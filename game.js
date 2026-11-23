@@ -1,176 +1,90 @@
-(() => {
-'use strict';
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-const W = 416, TILE = 16, COLS = 26, ROWS = 26;
-const $ = id => document.getElementById(id);
-const ui = {level:$('level'), enemies:$('enemies'), lives:$('lives'), overlay:$('overlay'), title:$('overlayTitle'), text:$('overlayText'), start:$('startBtn')};
-let map=[], player, enemies=[], bullets=[], particles=[], pickups=[], keys={}, touchDir=null, firing=false;
-let running=false, paused=false, level=1, lives=3, score=0, remaining=20, spawnTimer=0, last=0, sound=true, audioCtx=null, frame=0, baseAlive=true;
-const DIR={up:[0,-1],right:[1,0],down:[0,1],left:[-1,0]};
-const COLORS={grass:'#42633c',brick:'#a65b36',steel:'#89979a',water:'#315b79',ice:'#8bb8bd',base:'#d8bd72'};
-function tone(freq=220,duration=.07,type='square',vol=.035){if(!sound)return;try{audioCtx=audioCtx||new(window.AudioContext||window.webkitAudioContext)();const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type;o.frequency.value=freq;g.gain.value=vol;g.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+duration);o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+duration)}catch(e){}}
-function rand(n){return Math.floor(Math.random()*n)}
-function tile(x,y){return map[y]?.[x]??1}
-function setTile(x,y,v){if(map[y]&&map[y][x]!==undefined)map[y][x]=v}
-function makeMap(){
- map=Array.from({length:ROWS},()=>Array(COLS).fill(0));
- // Boundary walls
- for(let x=0;x<COLS;x++){map[0][x]=1;map[ROWS-1][x]=1}
- for(let y=0;y<ROWS;y++){map[y][0]=1;map[y][COLS-1]=1}
- // Symmetric, classic battlefield layout
- const blocks=[
- [3,3,2,2,1],[8,3,2,1,1],[16,3,2,2,1],[21,3,2,2,1],
- [5,7,2,2,1],[11,6,1,3,1],[14,6,1,3,1],[19,7,2,2,1],
- [2,12,2,1,1],[7,11,2,2,1],[17,11,2,2,1],[22,12,2,1,1],
- [4,17,2,2,1],[9,16,1,3,1],[16,16,1,3,1],[20,17,2,2,1],
- [7,21,2,1,1],[17,21,2,1,1]
- ];
- blocks.forEach(([x,y,w,h,v])=>{for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)setTile(xx,yy,v)});
- // Steel bunkers
- [[2,5],[23,5],[2,19],[23,19],[12,9],[13,9]].forEach(([x,y])=>setTile(x,y,2));
- // Water strips
- for(let x=10;x<16;x++){setTile(x,13,3)}
- // Base compound, clear area
- for(let y=23;y<25;y++)for(let x=11;x<15;x++)setTile(x,y,0);
+(()=>{'use strict';
+const C=document.getElementById('game'),g=C.getContext('2d'),N=26,T=16,S=416;
+const $=id=>document.getElementById(id);
+const ui={menu:$('menu'),title:$('menuTitle'),desc:$('menuDesc'),buttons:$('menuButtons'),editor:$('editorPanel'),level:$('hudLevel'),enemies:$('hudEnemies'),lives:$('hudLives'),score:$('hudScore')};
+const D={up:[0,-1],right:[1,0],down:[0,1],left:[-1,0]};
+let map=[],players=[],enemies=[],shots=[],fx=[],items=[],keys={},touch={1:null,2:null},fire={1:false,2:false};
+let active=false,paused=false,mode='menu',level=1,lives=[3,3],score=0,left=0,spawnWait=0,last=0,sound=true,audio=null,selectedTile=0,editorMap=null,editorDrawing=false;
+const levels=[
+ {name:'ПЕРВЫЙ РУБЕЖ',blocks:[[3,3,3,1],[8,3,2,1],[16,3,2,2],[21,3,2,2],[5,7,2,2],[11,6,1,3],[14,6,1,3],[19,7,2,2],[2,12,2,1],[7,11,2,2],[17,11,2,2],[22,12,2,1],[4,17,2,2],[9,16,1,3],[16,16,1,3],[20,17,2,2],[7,20,2,1],[17,20,2,1]],water:[[10,13,6,1]]},
+ {name:'СТАЛЬНОЙ КОРИДОР',blocks:[[2,3,4,1],[8,3,1,4],[17,3,1,4],[20,3,4,1],[3,9,3,2],[10,8,1,5],[15,8,1,5],[20,9,3,2],[2,16,4,1],[8,16,1,4],[17,16,1,4],[20,16,4,1],[5,21,4,1],[17,21,4,1]],water:[[12,3,2,3],[12,19,2,3]]},
+ {name:'ВОДНЫЙ РУБЕЖ',blocks:[[3,4,2,2],[7,4,2,1],[17,4,2,1],[21,4,2,2],[4,10,3,1],[9,9,1,4],[16,9,1,4],[19,10,3,1],[3,17,2,2],[8,17,2,1],[16,17,2,1],[21,17,2,2]],water:[[10,6,6,2],[10,15,6,2]]},
+ {name:'КРЕПОСТЬ',blocks:[[2,3,2,3],[6,3,2,1],[18,3,2,1],[22,3,2,3],[4,9,4,1],[9,8,1,4],[16,8,1,4],[18,9,4,1],[2,16,3,1],[7,15,2,2],[17,15,2,2],[21,16,3,1],[5,21,3,1],[18,21,3,1]],water:[[12,5,2,3],[12,17,2,3]]},
+ {name:'ПОСЛЕДНИЙ РУБЕЖ',blocks:[[3,3,2,2],[7,3,1,4],[18,3,1,4],[21,3,2,2],[2,10,4,1],[8,9,2,2],[16,9,2,2],[20,10,4,1],[3,17,2,2],[8,16,1,3],[17,16,1,3],[21,17,2,2]],water:[[11,7,4,2],[11,17,4,2]]}
+];
+function blank(){let m=Array.from({length:N},()=>Array(N).fill(0));for(let i=0;i<N;i++)m[0][i]=m[N-1][i]=m[i][0]=m[i][N-1]=2;return m}
+function putRect(m,x,y,w,h,v){for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)if(xx>0&&xx<N-1&&yy>0&&yy<N-1)m[yy][xx]=v}
+function protectBase(m){ // HQ is a real solid tile group, separated from player spawn
+ putRect(m,11,23,4,2,0);putRect(m,11,23,4,1,1);m[24][12]=4;m[24][13]=4;
+ // opening at the centre of the wall so the HQ is reachable only after wall damage
+ m[23][12]=0;m[23][13]=0;
 }
-function entity(x,y,dir='up',kind='player'){return {x,y,dir,kind,hp:kind==='heavy'?3:1,cool:0,move:0,flash:0}}
-function resetLevel(){
- makeMap();bullets=[];particles=[];pickups=[];enemies=[];
- player=entity(12*16+4,24*16+4,'up','player');player.speed=kindSpeed('player');
- remaining=20+(level-1)*4;spawnTimer=30;baseAlive=true;
- updateUI();
-}
-function kindSpeed(k){return k==='player'?1.65:k==='fast'?1.35:k==='heavy'?.75:0.85}
-function updateUI(){ui.level.textContent=level;ui.enemies.textContent=remaining+enemies.length;ui.lives.textContent=lives}
-function startGame(){level=1;lives=3;score=0;resetLevel();running=true;paused=false;ui.overlay.classList.add('hidden');tone(440,.1)}
-function showOverlay(title,text,button='ИГРАТЬ СНОВА'){running=false;ui.title.textContent=title;ui.text.textContent=text;ui.start.innerHTML=button+' <span>▶</span>';ui.overlay.classList.remove('hidden')}
-function gameOver(){showOverlay('МИССИЯ ПРОВАЛЕНА','Штаб уничтожен. Очки: '+score+' · Попробуй ещё раз.')}
-function nextLevel(){level++;resetLevel();tone(660,.16,'triangle')}
-function rectHit(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}
-function blocked(x,y,w=8,h=8,ignore=null){
- if(x<16||y<16||x+w>W-16||y+h>W-16)return true;
- const x0=Math.floor(x/TILE),x1=Math.floor((x+w-1)/TILE),y0=Math.floor(y/TILE),y1=Math.floor((y+h-1)/TILE);
- for(let ty=y0;ty<=y1;ty++)for(let tx=x0;tx<=x1;tx++){const t=tile(tx,ty);if(t===1||t===2||t===3)return true}
- const solids=[player,...enemies].filter(e=>e&&e!==ignore&&e.kind!=='dead');
- return solids.some(e=>rectHit({x,y,w,h},{x:e.x+2,y:e.y+2,w:12,h:12}));
-}
-function aim(e,dir){e.dir=dir}
-function shoot(e){
- if(e.cool>0)return;e.cool=e.kind==='player'?22: e.kind==='heavy'?58:45;
- const [dx,dy]=DIR[e.dir];bullets.push({x:e.x+8+dx*8-2,y:e.y+8+dy*8-2,dx,dy,owner:e.kind,life:95,power:e.kind==='heavy'?2:1});
- tone(e.kind==='player'?260:130,.045,'square',.018);
-}
-function moveEntity(e,dir,dt){
- const [dx,dy]=DIR[dir];e.dir=dir;
- const speed=(e.speed||kindSpeed(e.kind))*dt;
- const nx=e.x+dx*speed,ny=e.y+dy*speed;
- if(!blocked(nx+2,ny+2,12,12,e)){e.x=nx;e.y=ny}
-}
-function playerUpdate(dt){
- if(!player)return;
- player.cool=Math.max(0,player.cool-dt);player.flash=Math.max(0,player.flash-dt);
- let dir=touchDir;
- if(keys.ArrowUp||keys.w||keys.W)dir='up';else if(keys.ArrowDown||keys.s||keys.S)dir='down';else if(keys.ArrowLeft||keys.a||keys.A)dir='left';else if(keys.ArrowRight||keys.d||keys.D)dir='right';
- if(dir)moveEntity(player,dir,dt);
- if(keys[' ']||firing)shoot(player);
-}
-function spawnEnemy(){
- if(remaining<=0||enemies.length>=4)return;
- const spots=[[1,1],[12,1],[23,1]];
- for(let i=0;i<spots.length;i++){const [tx,ty]=spots[(rand(3)+i)%3],x=tx*16+4,y=ty*16+4;
- if(![player,...enemies].some(e=>Math.hypot(e.x-x,e.y-y)<35)){const r=Math.random();const kind=r<.2?'fast':r<.36?'heavy':'enemy';const e=entity(x,y,'down',kind);e.speed=kindSpeed(kind);e.cool=rand(45);enemies.push(e);remaining--;break}}
-}
-function enemyUpdate(dt){
- spawnTimer-=dt;if(spawnTimer<=0){spawnEnemy();spawnTimer=105}
- enemies.forEach(e=>{
-  e.cool=Math.max(0,e.cool-dt);e.move-=dt;
-  if(e.move<=0){let dirs=['up','down','left','right'];if(Math.random()<.5){const dx=player.x-e.x,dy=player.y-e.y;dirs.sort((a,b)=>{const va=DIR[a][0]*dx+DIR[a][1]*dy,vb=DIR[b][0]*dx+DIR[b][1]*dy;return vb-va})}e.nextDir=dirs[rand(dirs.length)];e.move=25+rand(55)}
-  const old={x:e.x,y:e.y};moveEntity(e,e.nextDir||'down',dt);
-  if(old.x===e.x&&old.y===e.y&&Math.random()<.1)e.move=0;
-  if(Math.random()<.018|| (e.dir==='down'&&Math.abs(e.x-player.x)<40))shoot(e);
- });
-}
-function explode(x,y,big=false){
- for(let i=0;i<(big?22:10);i++){const a=Math.random()*Math.PI*2,s=.5+Math.random()*2.5;particles.push({x,y,dx:Math.cos(a)*s,dy:Math.sin(a)*s,life:18+rand(15),max:33,size:1+rand(3)})}
- tone(big?85:110,.12,'sawtooth',.025);
-}
-function damagePlayer(){lives--;explode(player.x+8,player.y+8,true);updateUI();if(lives<=0){gameOver();return}player.x=12*16+4;player.y=24*16+4;player.dir='up';player.flash=90;player.cool=60}
-function hitBullet(b){
- // Enemy fire can destroy the headquarters.
- if(b.owner!=='player' && b.x+2>=12*16 && b.x+2<14*16 && b.y+2>=23*16 && b.y+2<25*16){
-  baseAlive=false;explode(13*16,24*16,true);gameOver();return true;
- }
- const tx=Math.floor((b.x+2)/16),ty=Math.floor((b.y+2)/16),t=tile(tx,ty);
- if(t===1){setTile(tx,ty,0);explode(tx*16+8,ty*16+8);return true}
- if(t===2){if(b.power>1){setTile(tx,ty,0);explode(tx*16+8,ty*16+8)}return true}
- if(t===3)return true;
- if(b.owner==='player'){
-  const target=enemies.find(e=>rectHit({x:b.x,y:b.y,w:4,h:4},{x:e.x+1,y:e.y+1,w:14,h:14}));
-  if(target){target.hp-=1;target.flash=7;if(target.hp<=0){enemies=enemies.filter(e=>e!==target);score+=target.kind==='heavy'?300:100;explode(target.x+8,target.y+8,true);if(Math.random()<.12)pickups.push({x:target.x,y:target.y,type:'star'});updateUI()}return true}
- }else if(rectHit({x:b.x,y:b.y,w:4,h:4},{x:player.x+2,y:player.y+2,w:12,h:12})){
-  if(player.flash<=0)damagePlayer();return true
- }
- // Bullets destroy each other
- const other=bullets.find(o=>o!==b&&o.owner!==b.owner&&Math.hypot(o.x-b.x,o.y-b.y)<6);if(other){bullets=bullets.filter(o=>o!==other);return true}
- return false;
-}
-function bulletsUpdate(dt){
- bullets=bullets.filter(b=>{b.x+=b.dx*4.2*dt;b.y+=b.dy*4.2*dt;b.life-=dt;if(b.life<=0||b.x<0||b.y<0||b.x>W||b.y>W)return false;return !hitBullet(b)});
-}
-function update(dt){
- frame+=dt;playerUpdate(dt);enemyUpdate(dt);bulletsUpdate(dt);
- particles=particles.filter(p=>{p.x+=p.dx*dt;p.y+=p.dy*dt;p.dx*=.94;p.dy*=.94;p.life-=dt;return p.life>0});
- pickups.forEach(p=>{if(rectHit({x:player.x,y:player.y,w:16,h:16},{x:p.x,y:p.y,w:16,h:16})){lives=Math.min(5,lives+1);p.got=true;updateUI();tone(700,.15,'triangle')}});
- pickups=pickups.filter(p=>!p.got);
- if(remaining===0&&enemies.length===0){nextLevel()}
- updateUI();
-}
-function drawTank(e){
- const x=Math.round(e.x),y=Math.round(e.y);ctx.save();ctx.translate(x+8,y+8);const angle={up:0,right:Math.PI/2,down:Math.PI,left:-Math.PI/2}[e.dir]||0;ctx.rotate(angle);
- const playerTank=e.kind==='player',heavy=e.kind==='heavy',fast=e.kind==='fast';
- const body=playerTank?'#b7e76a':heavy?'#c58c55':fast?'#d8c56d':'#d7ded0';
- ctx.fillStyle='#27352b';ctx.fillRect(-8,-8,5,16);ctx.fillRect(3,-8,5,16);
- ctx.fillStyle=playerTank?'#536c36':'#56604d';for(let yy=-6;yy<7;yy+=4){ctx.fillRect(-8,yy,5,2);ctx.fillRect(3,yy,5,2)}
- ctx.fillStyle=body;ctx.fillRect(-4,-7,8,14);ctx.fillStyle=playerTank?'#e2ff9c':'#e6e1bd';ctx.fillRect(-3,-4,6,8);
- ctx.fillStyle='#394b31';ctx.fillRect(-2,-10,4,13);ctx.fillRect(-1,-12,2,7);
- ctx.fillStyle='#fff8c7';ctx.fillRect(-1,-11,2,3);
- if(e.flash>0){ctx.fillStyle='#fff';ctx.globalAlpha=.65;ctx.fillRect(-8,-8,16,16)}
- ctx.restore();
-}
-function drawTile(x,y,t){
- const px=x*16,py=y*16;
- if(t===0)return;
- if(t===1){ctx.fillStyle='#9b5334';ctx.fillRect(px,py,16,16);ctx.fillStyle='#d18150';ctx.fillRect(px+1,py+1,6,5);ctx.fillRect(px+9,py+1,6,5);ctx.fillRect(px+4,py+9,7,5);ctx.fillStyle='#663b2d';ctx.fillRect(px+7,py+6,2,3);ctx.fillRect(px,py+7,16,1)}
- if(t===2){ctx.fillStyle='#77888a';ctx.fillRect(px,py,16,16);ctx.fillStyle='#b3c0b9';ctx.fillRect(px+2,py+2,12,12);ctx.fillStyle='#657678';ctx.fillRect(px+4,py+4,8,8);ctx.fillStyle='#d1d8ca';ctx.fillRect(px+2,py+2,3,3)}
- if(t===3){ctx.fillStyle='#315c7b';ctx.fillRect(px,py,16,16);ctx.strokeStyle='#6d9eb4';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(px,py+5);ctx.lineTo(px+6,py+3);ctx.lineTo(px+12,py+5);ctx.lineTo(px+16,py+4);ctx.stroke()}
-}
-function draw(){
- ctx.fillStyle='#17251a';ctx.fillRect(0,0,W,W);
- // subtle ground texture
- for(let y=1;y<25;y++)for(let x=1;x<25;x++){if((x*7+y*11)%19===0){ctx.fillStyle='#263c27';ctx.fillRect(x*16+5,y*16+8,2,2)}}
- for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)drawTile(x,y,tile(x,y));
- // HQ eagle and protective brick
- ctx.fillStyle='#b49c60';ctx.fillRect(12*16,23*16,32,32);ctx.fillStyle='#e0ca84';ctx.fillRect(12*16+5,23*16+5,22,22);
- ctx.fillStyle='#6e5937';ctx.font='bold 20px monospace';ctx.fillText('★',12*16+7,23*16+22);
- // grass patches overlay
- for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++)if(tile(x,y)===4){ctx.fillStyle='#42633c';ctx.fillRect(x*16,y*16,16,16)}
- enemies.forEach(drawTank);if(player&&player.flash%10<6)drawTank(player);
- bullets.forEach(b=>{ctx.fillStyle=b.owner==='player'?'#fff1a1':'#ff775e';ctx.fillRect(Math.round(b.x),Math.round(b.y),4,4);ctx.fillStyle='#fff';ctx.fillRect(Math.round(b.x)+1,Math.round(b.y)+1,2,2)});
- particles.forEach(p=>{ctx.globalAlpha=Math.max(0,p.life/p.max);ctx.fillStyle=p.life>15?'#f5c76b':'#d75b39';ctx.fillRect(p.x,p.y,p.size,p.size);ctx.globalAlpha=1});
- pickups.forEach(p=>{ctx.fillStyle='#ffe477';ctx.fillRect(p.x+3,p.y+3,10,10);ctx.fillStyle='#fff';ctx.font='12px monospace';ctx.fillText('★',p.x+3,p.y+13)});
- // tiny scanline texture
- ctx.fillStyle='#000';ctx.globalAlpha=.07;for(let y=0;y<W;y+=4)ctx.fillRect(0,y,W,1);ctx.globalAlpha=1;
-}
-function loop(ts){const dt=Math.min(2.2,(ts-last)/16.67||1);last=ts;if(running&&!paused)update(dt);draw();requestAnimationFrame(loop)}
-$('startBtn').addEventListener('click',()=>{if(running&&paused){paused=false;ui.overlay.classList.add('hidden')}else if(!running)startGame()});
-$('pauseBtn').addEventListener('click',()=>{if(!running)return;paused=!paused;if(paused){ui.title.textContent='ПАУЗА';ui.text.textContent='Нажми продолжить, чтобы вернуться в бой.';ui.start.innerHTML='ПРОДОЛЖИТЬ <span>▶</span>';ui.overlay.classList.remove('hidden')}else ui.overlay.classList.add('hidden')});
-$('soundBtn').addEventListener('click',e=>{sound=!sound;e.currentTarget.textContent=sound?'ВКЛ':'ВЫКЛ'});
-window.addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();keys[e.key]=true;if(e.key==='Escape'&&running){paused=!paused;ui.overlay.classList.toggle('hidden',!paused);ui.title.textContent='ПАУЗА';ui.text.textContent='Игра приостановлена.';ui.start.innerHTML='ПРОДОЛЖИТЬ <span>▶</span>'}},{passive:false});
-window.addEventListener('keyup',e=>{keys[e.key]=false});
-function bindHold(el,onDown,onUp){el.addEventListener('pointerdown',e=>{e.preventDefault();el.classList.add('active');el.setPointerCapture?.(e.pointerId);onDown()});['pointerup','pointercancel','lostpointercapture'].forEach(ev=>el.addEventListener(ev,e=>{el.classList.remove('active');onUp()}))}
-document.querySelectorAll('[data-dir]').forEach(btn=>bindHold(btn,()=>touchDir=btn.dataset.dir,()=>{if(touchDir===btn.dataset.dir)touchDir=null}));
-bindHold($('fireBtn'),()=>firing=true,()=>firing=false);
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&running&&!paused){paused=true;ui.title.textContent='ПАУЗА';ui.text.textContent='Игра остановлена, пока вкладка была неактивна.';ui.start.innerHTML='ПРОДОЛЖИТЬ <span>▶</span>';ui.overlay.classList.remove('hidden')}});
-resetLevel();showOverlay('ТАНЧИКИ','Защити штаб. Уничтожь все вражеские танки!');requestAnimationFrame(loop);
+function makeLevel(n){let m=blank(),d=levels[(n-1)%levels.length];d.blocks.forEach(a=>putRect(m,...a,1));(d.water||[]).forEach(a=>putRect(m,...a,3));
+ // steel anchor points
+ [[2,6],[23,6],[2,18],[23,18]].forEach(([x,y])=>m[y][x]=2);
+ // keep all spawn lanes and base approach clear
+ for(let y=1;y<6;y++)for(let x=1;x<5;x++)m[y][x]=0;
+ for(let y=1;y<6;y++)for(let x=11;x<15;x++)m[y][x]=0;
+ for(let y=1;y<6;y++)for(let x=21;x<25;x++)m[y][x]=0;
+ for(let y=19;y<23;y++)for(let x=10;x<16;x++)m[y][x]=0;
+ protectBase(m);return m}
+function soundFx(f=220,d=.06,type='square'){if(!sound)return;try{audio=audio||new(window.AudioContext||window.webkitAudioContext)();let o=audio.createOscillator(),a=audio.createGain();o.type=type;o.frequency.value=f;a.gain.value=.025;a.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);o.connect(a);a.connect(audio.destination);o.start();o.stop(audio.currentTime+d)}catch(e){}}
+function tank(x,y,dir,kind,id){return{x,y,dir,kind,id,hp:kind==='heavy'?3:1,cool:0,flash:0,turn:0,speed:kind==='p1'||kind==='p2'?1.55:kind==='fast'?1.35:kind==='heavy'?.72:.9}}
+function init(n=1,two=false,custom=null){level=n;map=custom?custom.map(r=>r.slice()):makeLevel(n);players=[tank(12*T+0,20*T,'up','p1',1)];if(two)players.push(tank(14*T,20*T,'up','p2',2));enemies=[];shots=[];fx=[];items=[];left=two?20:20;spawnWait=25;active=true;paused=false;mode='game';ui.menu.classList.add('hidden');ui.editor.classList.add('hidden');hud();soundFx(500,.1,'triangle')}
+function hud(){ui.level.textContent=level+(mode==='editor'?'*':'');ui.enemies.textContent=left+enemies.length;ui.lives.textContent=lives[0]+(players.length>1?'/'+lives[1]:'');ui.score.textContent=score}
+function overlay(title,desc,buttons){active=false;paused=false;ui.title.textContent=title;ui.desc.textContent=desc;ui.buttons.innerHTML=buttons;ui.menu.classList.remove('hidden');ui.editor.classList.add('hidden');mode='menu'}
+function mainMenu(){overlay('ТАНЧИКИ','Защити штаб. Уничтожь вражеские танки.',`<button data-action="start" class="primary">ИГРАТЬ · 1 ИГРОК ▶</button><button data-action="two">ИГРАТЬ · 2 ИГРОКА</button><button data-action="levels">ВЫБОР УРОВНЯ</button><button data-action="editor">РЕДАКТОР КАРТ</button><button data-action="records">ТАБЛИЦА РЕКОРДОВ</button><button data-action="howto">УПРАВЛЕНИЕ</button>`)}
+function levelMenu(){let b=levels.map((l,i)=>`<button data-level="${i+1}">${String(i+1).padStart(2,'0')} · ${l.name}</button>`).join('');overlay('ВЫБОР УРОВНЯ','Выбери поле боя.',b+'<button data-action="home">← ГЛАВНОЕ МЕНЮ</button>')}
+function records(){let a=[];try{a=JSON.parse(localStorage.getItem('bc_records')||'[]')}catch(e){}let body=a.length?a.slice(0,8).map((r,i)=>`<button>${i+1}. ${escapeHtml(r.name)} — ${r.score} · УР. ${r.level}</button>`).join(''):'<button>Рекордов пока нет — начни игру!</button>';overlay('РЕКОРДЫ','Лучшие результаты на этом устройстве.',body+'<button data-action="home">← ГЛАВНОЕ МЕНЮ</button>')}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function saveRecord(){let a=[];try{a=JSON.parse(localStorage.getItem('bc_records')||'[]')}catch(e){}a.push({name:players.length>1?'2 ИГРОКА':'ИГРОК',score,level});a.sort((x,y)=>y.score-x.score);try{localStorage.setItem('bc_records',JSON.stringify(a.slice(0,10)))}catch(e){}}
+function howto(){overlay('УПРАВЛЕНИЕ','Игрок 1: WASD или стрелки + пробел. Игрок 2: IJKL + Enter. На телефоне — экранные крестовины и кнопки огня. P / Esc — пауза.','<button data-action="home">← НАЗАД</button>')}
+function editor(){active=false;mode='editor';editorMap=makeLevel(1);map=editorMap;ui.menu.classList.add('hidden');ui.editor.classList.remove('hidden');draw()}
+function startEditorGame(){let m=editorMap.map(r=>r.slice());protectBase(m);init(1,false,{map:m})}
+function solidAt(px,py){if(px<0||py<0||px+14>S||py+14>S)return true;let x0=Math.floor(px/T),x1=Math.floor((px+13)/T),y0=Math.floor(py/T),y1=Math.floor((py+13)/T);for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){let v=map[y]?.[x]??2;if(v===1||v===2||v===3||v===4)return true}return false}
+function overlaps(a,b){return a.x<b.x+14&&a.x+14>b.x&&a.y<b.y+14&&a.y+14>b.y}
+function blocked(e,nx,ny){if(solidAt(nx+1,ny+1))return true;for(let p of players)if(p!==e&&overlaps({x:nx,y:ny},p))return true;for(let q of enemies)if(q!==e&&overlaps({x:nx,y:ny},q))return true;return false}
+function move(e,dir,dt){if(!dir)return;let [dx,dy]=D[dir],step=e.speed*dt;e.dir=dir;let nx=e.x+dx*step,ny=e.y+dy*step;
+ // axis-separated collision allows sliding along walls
+ if(!blocked(e,nx,e.y))e.x=nx;if(!blocked(e,e.x,ny))e.y=ny}
+function shoot(e){if(e.cool>0)return;e.cool=e.kind==='p1'||e.kind==='p2'?23:e.kind==='heavy'?56:43;let [dx,dy]=D[e.dir];shots.push({x:e.x+7+dx*8-2,y:e.y+7+dy*8-2,dx,dy,owner:e.kind,power:e.kind==='heavy'?2:1,life:90});soundFx(e.kind==='p1'||e.kind==='p2'?270:130,.04)}
+function playerStep(p,dt){p.cool=Math.max(0,p.cool-dt);p.flash=Math.max(0,p.flash-dt);let d=touch[p.id];if(p.id===1){if(keys.ArrowUp||keys.w||keys.W)d='up';else if(keys.ArrowDown||keys.s||keys.S)d='down';else if(keys.ArrowLeft||keys.a||keys.A)d='left';else if(keys.ArrowRight||keys.d||keys.D)d='right';if(keys[' '])fire[1]=true}else{if(keys.i||keys.I)d='up';else if(keys.k||keys.K)d='down';else if(keys.j||keys.J)d='left';else if(keys.l||keys.L)d='right';if(keys.Enter)fire[2]=true}
+ if(d)move(p,d,dt);if(fire[p.id])shoot(p)}
+function spawn(){if(left<=0||enemies.length>=4)return;let spots=[[1,1],[12,1],[23,1]],made=false;for(let i=0;i<3;i++){let [tx,ty]=spots[(Math.random()*3|0+i)%3],x=tx*T,y=ty*T;if(![...players,...enemies].some(e=>Math.hypot(e.x-x,e.y-y)<36)){let r=Math.random(),kind=r<.22?'fast':r<.4?'heavy':'enemy';enemies.push(tank(x,y,'down',kind,0));left--;made=true;break}}if(!made)spawnWait=15}
+function enemyStep(dt){spawnWait-=dt;if(spawnWait<=0){spawn();spawnWait=95}for(let e of enemies){e.cool=Math.max(0,e.cool-dt);e.turn-=dt;if(e.turn<=0){let opts=['down','left','right','up'];let dx=players[0].x-e.x,dy=players[0].y-e.y;opts.sort((a,b)=>(D[b][0]*dx+D[b][1]*dy)-(D[a][0]*dx+D[a][1]*dy));e.next=Math.random()<.65?opts[0]:opts[Math.random()*4|0];e.turn=25+Math.random()*45}let ox=e.x,oy=e.y;move(e,e.next,dt);if(ox===e.x&&oy===e.y)e.turn=0;if(Math.random()<.018||e.cool===0&&Math.random()<.008)shoot(e)}}
+function burst(x,y,big=false){for(let i=0;i<(big?20:9);i++){let a=Math.random()*6.28,s=.5+Math.random()*2.5;fx.push({x,y,dx:Math.cos(a)*s,dy:Math.sin(a)*s,life:22+Math.random()*12})}soundFx(90,.12,'sawtooth')}
+function playerHit(p){lives[p.id-1]--;burst(p.x+7,p.y+7,true);if(lives[p.id-1]<=0){players=players.filter(q=>q!==p);if(!players.length)finish(false);return}p.x=p.id===1?12*T:14*T;p.y=20*T;p.dir='up';p.flash=90;p.cool=60}
+function hitShot(b){let tx=Math.floor((b.x+2)/T),ty=Math.floor((b.y+2)/T),v=map[ty]?.[tx]??2;if(v===1){map[ty][tx]=0;burst(tx*T+8,ty*T+8);return true}if(v===2){if(b.power>1){map[ty][tx]=0;burst(tx*T+8,ty*T+8)}return true}if(v===3||v===4)return true;
+ if(b.owner==='p1'||b.owner==='p2'){let e=enemies.find(q=>overlaps({x:b.x,y:b.y},q));if(e){e.hp-=b.power;e.flash=6;if(e.hp<=0){enemies=enemies.filter(q=>q!==e);score+=e.kind==='heavy'?300:100;burst(e.x+7,e.y+7,true);if(Math.random()<.1)items.push({x:e.x,y:e.y});hud()}return true}}
+ else {let p=players.find(q=>overlaps({x:b.x,y:b.y},q));if(p){if(p.flash<=0)playerHit(p);return true}}
+ return false}
+function shotsStep(dt){shots=shots.filter(b=>{b.x+=b.dx*4.3*dt;b.y+=b.dy*4.3*dt;b.life-=dt;if(b.life<=0||b.x<0||b.y<0||b.x>S||b.y>S)return false;return !hitShot(b)})}
+function update(dt){players.forEach(p=>playerStep(p,dt));enemyStep(dt);shotsStep(dt);fx=fx.filter(p=>{p.x+=p.dx*dt;p.y+=p.dy*dt;p.life-=dt;return p.life>0});for(let it of items){if(players.some(p=>overlaps(p,{x:it.x,y:it.y})))it.got=true}items=items.filter(i=>!i.got);if(left===0&&enemies.length===0){if(level<5){level++;map=makeLevel(level);players.forEach((p,i)=>{p.x=(i?14:12)*T;p.y=20*T;p.dir='up'});left=20;spawnWait=30;shots=[];hud();soundFx(700,.2,'triangle')}else finish(true)}hud()}
+function finish(win){saveRecord();overlay(win?'ПОБЕДА!':'ИГРА ОКОНЧЕНА',`Очки: ${score} · Достигнутый уровень: ${level}`,`<button class="primary" data-action="start">ЕЩЁ РАЗ ▶</button><button data-action="records">ТАБЛИЦА РЕКОРДОВ</button><button data-action="home">ГЛАВНОЕ МЕНЮ</button>`)}
+function tileDraw(x,y,v){let px=x*T,py=y*T;if(v===0)return;if(v===1){g.fillStyle='#9b5435';g.fillRect(px,py,16,16);g.fillStyle='#d18450';g.fillRect(px+1,py+1,6,5);g.fillRect(px+9,py+1,6,5);g.fillRect(px+4,py+9,7,5);g.fillStyle='#633b2e';g.fillRect(px,py+7,16,1)}else if(v===2){g.fillStyle='#687b7c';g.fillRect(px,py,16,16);g.fillStyle='#b4c1b8';g.fillRect(px+2,py+2,12,12);g.fillStyle='#607173';g.fillRect(px+4,py+4,8,8)}else if(v===3){g.fillStyle='#315d7b';g.fillRect(px,py,16,16);g.strokeStyle='#80aabd';g.beginPath();g.moveTo(px,py+5);g.lineTo(px+7,py+3);g.lineTo(px+16,py+5);g.stroke()}else if(v===4){g.fillStyle='#426d3d';g.fillRect(px,py,16,16);g.fillStyle='#7ba454';g.fillRect(px+3,py+4,3,7);g.fillRect(px+10,py+8,3,6)}else if(v===5){g.fillStyle='#cbb878';g.fillRect(px,py,16,16);g.fillStyle='#6a5839';g.font='13px monospace';g.fillText('★',px+2,py+13)}}
+function drawTank(e){g.save();g.translate(Math.round(e.x+7),Math.round(e.y+7));g.rotate(({up:0,right:Math.PI/2,down:Math.PI,left:-Math.PI/2})[e.dir]||0);let player=e.kind==='p1'||e.kind==='p2',color=e.kind==='p1'?'#b9eb6c':e.kind==='p2'?'#70c6ed':e.kind==='heavy'?'#c48c55':e.kind==='fast'?'#d8c66e':'#d9dfcf';g.fillStyle='#27362b';g.fillRect(-7,-7,4,14);g.fillRect(3,-7,4,14);g.fillStyle='#64734f';for(let y=-5;y<7;y+=4){g.fillRect(-7,y,4,2);g.fillRect(3,y,4,2)}g.fillStyle=color;g.fillRect(-3,-6,6,12);g.fillStyle='#e9efc8';g.fillRect(-2,-3,4,6);g.fillStyle='#3a4b32';g.fillRect(-2,-10,4,12);g.fillStyle='#fff4c6';g.fillRect(-1,-10,2,3);if(e.flash>0){g.fillStyle='#fff';g.fillRect(-7,-7,14,14)}g.restore()}
+function draw(){g.fillStyle='#17251a';g.fillRect(0,0,S,S);for(let y=1;y<25;y++)for(let x=1;x<25;x++)if((x*7+y*11)%19===0){g.fillStyle='#263c27';g.fillRect(x*T+5,y*T+8,2,2)}for(let y=0;y<N;y++)for(let x=0;x<N;x++)tileDraw(x,y,map[y]?.[x]||0);
+ // HQ is at bottom centre, solid tiles, not a player spawn tile
+ g.fillStyle='#d4bd79';g.fillRect(12*T,24*T,32,16);g.fillStyle='#6c5939';g.font='bold 17px monospace';g.fillText('★',12*T+7,24*T+14);
+ enemies.forEach(drawTank);players.forEach(p=>{if(p.flash%10<6)drawTank(p)});shots.forEach(b=>{g.fillStyle=b.owner==='p1'||b.owner==='p2'?'#fff1a1':'#ff785f';g.fillRect(b.x,b.y,4,4)});fx.forEach(p=>{g.globalAlpha=Math.max(0,p.life/34);g.fillStyle=p.life>15?'#f4c76b':'#d85c39';g.fillRect(p.x,p.y,3,3);g.globalAlpha=1});items.forEach(i=>{g.fillStyle='#ffe477';g.fillRect(i.x+3,i.y+3,10,10);g.fillStyle='#fff';g.font='12px monospace';g.fillText('★',i.x+2,i.y+13)});g.globalAlpha=.07;g.fillStyle='#000';for(let y=0;y<S;y+=4)g.fillRect(0,y,S,1);g.globalAlpha=1}
+function loop(t){let dt=Math.min(2.2,(t-last)/16.67||1);last=t;if(active&&!paused)update(dt);draw();requestAnimationFrame(loop)}
+function pointerCell(e){let r=C.getBoundingClientRect(),x=Math.floor((e.clientX-r.left)/r.width*N),y=Math.floor((e.clientY-r.top)/r.height*N);return{x,y}}
+function paint(e){if(mode!=='editor')return;let{x,y}=pointerCell(e);if(x<1||x>24||y<1||y>22)return;editorMap[y][x]=selectedTile;map=editorMap;draw()}
+C.addEventListener('pointerdown',e=>{if(mode==='editor'){editorDrawing=true;C.setPointerCapture(e.pointerId);paint(e)}});C.addEventListener('pointermove',e=>{if(editorDrawing)paint(e)});C.addEventListener('pointerup',()=>editorDrawing=false);C.addEventListener('pointercancel',()=>editorDrawing=false);
+ui.buttons.addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;let a=b.dataset.action;if(a==='start')init(1,false);if(a==='two')init(1,true);if(a==='levels')levelMenu();if(a==='editor')editor();if(a==='records')records();if(a==='howto')howto();if(a==='home')mainMenu();if(b.dataset.level)init(+b.dataset.level,false)});
+$('pause').onclick=()=>{if(!active)return;paused=!paused;if(paused){overlay('ПАУЗА','Игра остановлена.','<button class="primary" data-action="resume">ПРОДОЛЖИТЬ ▶</button><button data-action="home">ГЛАВНОЕ МЕНЮ</button>');active=true;paused=true}else{ui.menu.classList.add('hidden');active=true}};
+ui.buttons.addEventListener('click',e=>{if(e.target.closest('[data-action="resume"]')){ui.menu.classList.add('hidden');active=true;paused=false}});
+$('editorClose').onclick=mainMenu;$('clearMap').onclick=()=>{editorMap=blank();map=editorMap;draw()};
+$('saveMap').onclick=()=>{try{localStorage.setItem('bc_custom_map',JSON.stringify(editorMap));alert('Карта сохранена на этом устройстве.')}catch(e){alert('Не удалось сохранить карту в браузере.')}};
+$('playMap').onclick=startEditorGame;
+document.querySelectorAll('[data-tile]').forEach(b=>b.onclick=()=>{selectedTile=+b.dataset.tile;document.querySelectorAll('[data-tile]').forEach(x=>x.classList.toggle('selected',x===b))});
+function hold(el,down,up){el.addEventListener('pointerdown',e=>{e.preventDefault();el.classList.add('active');el.setPointerCapture(e.pointerId);down()});['pointerup','pointercancel','lostpointercapture'].forEach(k=>el.addEventListener(k,()=>{el.classList.remove('active');up()}))}
+document.querySelectorAll('[data-dir]').forEach(b=>hold(b,()=>touch[+b.dataset.player]=b.dataset.dir,()=>{if(touch[+b.dataset.player]===b.dataset.dir)touch[+b.dataset.player]=null}));
+hold($('fire1'),()=>fire[1]=true,()=>fire[1]=false);hold($('fire2'),()=>fire[2]=true,()=>fire[2]=false);
+window.addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();keys[e.key]=true;if((e.key==='Escape'||e.key==='p'||e.key==='P')&&active){paused=!paused;if(paused){overlay('ПАУЗА','Игра остановлена.','<button class="primary" data-action="resume">ПРОДОЛЖИТЬ ▶</button><button data-action="home">ГЛАВНОЕ МЕНЮ</button>');active=true;paused=true}else ui.menu.classList.add('hidden')}},{passive:false});
+window.addEventListener('keyup',e=>{keys[e.key]=false;if(e.key===' ')fire[1]=false;if(e.key==='Enter')fire[2]=false});
+$('sound').onclick=e=>{sound=!sound;e.currentTarget.textContent=sound?'ВКЛ':'ВЫКЛ'};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&active&&!paused){paused=true;overlay('ПАУЗА','Вкладка была неактивна.','<button class="primary" data-action="resume">ПРОДОЛЖИТЬ ▶</button>');active=true;paused=true}});
+try{let saved=JSON.parse(localStorage.getItem('bc_custom_map')||'null');if(saved&&saved.length===N)editorMap=saved}catch(e){}
+map=makeLevel(1);mainMenu();hud();requestAnimationFrame(loop);
 })();
