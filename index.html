@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#101a16">
+  <title>Танчики — Битва</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="game-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">▣</span><span>ТАНЧИКИ <small>ARCADE BATTLE</small></span></div>
+      <div class="stats">
+        <span>УРОВЕНЬ <b id="level">1</b></span>
+        <span>ВРАГИ <b id="enemies">20</b></span>
+        <span>ЖИЗНИ <b id="lives">3</b></span>
+      </div>
+      <button id="pauseBtn" class="icon-btn" aria-label="Пауза">Ⅱ</button>
+    </header>
+
+    <section class="play-area">
+      <div class="side-panel left-panel">
+        <div class="side-label">МИССИЯ</div>
+        <div class="mission-icon">★</div>
+        <p>Защити<br>штаб</p>
+        <div class="mini-status"><i></i><i></i><i></i></div>
+      </div>
+      <div class="screen-wrap">
+        <canvas id="game" width="416" height="416" aria-label="Игровое поле"></canvas>
+        <div id="overlay" class="overlay">
+          <div class="overlay-card">
+            <div class="pixel-emblem">▣</div>
+            <h1 id="overlayTitle">ТАНЧИКИ</h1>
+            <p id="overlayText">Защити штаб. Уничтожь все вражеские танки!</p>
+            <button id="startBtn" class="primary-btn">НАЧАТЬ ИГРУ <span>▶</span></button>
+            <div class="hint">WASD / стрелки — движение · Пробел — огонь</div>
+          </div>
+        </div>
+      </div>
+      <div class="side-panel right-panel">
+        <div class="side-label">АРСЕНАЛ</div>
+        <div class="weapon">✦</div>
+        <p>СТАНДАРТ<br><b>× 1</b></p>
+        <div class="radar"><span></span><i></i></div>
+        <small>СЕКТОР 01</small>
+      </div>
+    </section>
+
+    <section class="mobile-controls" aria-label="Сенсорное управление">
+      <div class="dpad">
+        <button class="pad up" data-dir="up" aria-label="Вверх">▲</button>
+        <button class="pad left" data-dir="left" aria-label="Влево">◀</button>
+        <button class="pad right" data-dir="right" aria-label="Вправо">▶</button>
+        <button class="pad down" data-dir="down" aria-label="Вниз">▼</button>
+        <span class="pad-center"></span>
+      </div>
+      <button id="fireBtn" class="fire-btn" aria-label="Стрелять"><span>●</span><small>ОГОНЬ</small></button>
+    </section>
+
+    <footer class="bottom-bar">
+      <span><i class="online-dot"></i> СИСТЕМА ГОТОВА</span>
+      <span>1985 — 2026 <b>◆</b> ARCADE DIVISION</span>
+      <span>ЗВУК <button id="soundBtn" class="sound-toggle">ВКЛ</button></span>
+    </footer>
+  </main>
+  <script src="game.js"></script>
+</body>
+</html>
